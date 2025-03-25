@@ -9,6 +9,7 @@ call_empty_state(G) -> G(empty_state()).
 %% stream = actor
 %% request more by sending {req, ReqPid}
 %% receive answers as {more, {Sub,VC}}, {nomore, {Sub,VC} or nomore
+%% {forward, New} indicates stream is replaced by New stream
 %% NOTE: currently work only starts upon request
 %% TODO: main should spawn a process that takes queries
 %% and returns answers using take or take_all
@@ -71,13 +72,16 @@ mplus(Str1, Str2) ->
             receive
                 nomore ->
                     Str2 ! {req, self()},
-                    forward(ReqPid, Str2);
+                    ReqPid ! {forward, Str2};
                 {nomore, State} ->
                     ReqPid ! {more, State},
-                    forward(ReqPid, Str2);
+                    ReqPid ! {forward, Str2};
                 {more, State} ->
                     ReqPid ! {more, State},
-                    mplus(Str2, Str1)
+                    mplus(Str2, Str1);
+                {forward, New} ->
+                    self() ! {req, ReqPid},
+                    mplus(New, Str2)
                 %F when is_function(F) ->
                     %% NOTE: sending func upstream again :(
                     %ReqPid ! fun() -> mplus(Str2, Str1()) end;
@@ -94,13 +98,16 @@ bind(Stream, G) ->
                 nomore ->
                     ReqPid ! nomore;
                 {nomore, State} ->
-                    self() ! {req, ReqPid},
                     New = G(State),
-                    forward(ReqPid, New);
+                    New ! {req, ReqPid},
+                    ReqPid ! {forward, New};
                 {more, State} ->
                     self() ! {req, ReqPid},
                     Bind = spawn(fun() -> bind(Stream, G) end),
-                    mplus(G(State), Bind)
+                    mplus(G(State), Bind);
+                {forward, New} ->
+                    self() ! {req, ReqPid},
+                    bind(New, G)
                 %F when is_function(F) ->
                     %% NOTE: sending func upstream again :(
                     %ReqPid ! fun() -> bind(Stream(), G) end;
@@ -108,14 +115,6 @@ bind(Stream, G) ->
             end;
         endofreq -> exit("endofreq")
     end.
-
-forward(Req, Stream) ->
-    receive 
-        {req, Req} -> Stream ! {req, self()};
-        endofreq -> exit("endofreq");
-        X -> Req ! X
-    end,
-    forward(Req, Stream).
 
 -define(zzz(G), fun(State) -> fun() -> apply(G, [State]) end end).
 
@@ -135,7 +134,8 @@ take_all(S) ->
     receive
         nomore -> [];
         {nomore, State} -> [State];
-        {more, State} -> [State|take_all(S)]
+        {more, State} -> [State|take_all(S)];
+        {forward, Stream} -> take_all(Stream)
     end.
 
 take(N, S) when N > 0 ->
@@ -143,7 +143,8 @@ take(N, S) when N > 0 ->
     receive
         nomore -> [];
         {nomore, State} -> [State];
-        {more, State} -> M=N-1, [State|take(M, S)]
+        {more, State} -> M=N-1, [State|take(M, S)];
+        {forward, Stream} -> take(N, Stream)
     end;
 take(0, _) -> [].
     
