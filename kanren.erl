@@ -74,7 +74,7 @@ conj_plus([G|T]) -> conj(?zzz(G), conj_plus(T)).
 
 -define(fresh(Goals), conj_plus(Goals)).
 -define(fresh(X, Goals), call_fresh(fun(X) -> conj_plus(Goals) end)).
--define(fresh(X,Y, Goals), call_fresh(fun(X,Y) -> conj_plus(Goals) end)).
+-define(fresh(X,Y, Goals), call_fresh(fun(X) -> call_fresh(fun(Y) -> conj_plus(Goals) end) end)).
 %% etc..
 
 pull(F) when is_function(F) -> pull(F());
