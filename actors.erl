@@ -8,8 +8,9 @@ call_empty_state(G) -> G(empty_state()).
 
 %% stream = actor
 %% request more by sending {req, ReqPid}
-%% receive answers as {more, {Sub,VC}}, {nomore, {Sub,VC} or nomore
+%% receive answers as {more, {Sub,VC}}, {nomore, {Sub,VC}} or nomore
 %% {forward, New} indicates stream is replaced by New stream
+%% {forward, New, {Sub,VC}} combines answer and forward in one msg
 %% NOTE: currently work only starts upon request
 %% TODO: main should spawn a process that takes queries
 %% and returns answers using take or take_all
@@ -69,17 +70,18 @@ mplus(Str1, Str2) ->
             Str1 ! {req, self()},
             receive
                 nomore ->
-                    Str2 ! {req, self()},
                     ReqPid ! {forward, Str2};
                 {nomore, State} ->
-                    ReqPid ! {more, State},
-                    ReqPid ! {forward, Str2};
+                    ReqPid ! {forward, Str2, State};
                 {more, State} ->
                     ReqPid ! {more, State},
                     mplus(Str2, Str1);
                 {forward, New} ->
                     self() ! {req, ReqPid},
                     mplus(New, Str2);
+                {forward, New, State} ->
+                    ReqPid ! {more, State},
+                    mplus(Str2, New);
                 delay ->
                     self() ! {req, ReqPid},
                     mplus(Str2, Str1)
@@ -96,7 +98,6 @@ bind(Stream, G) ->
                     ReqPid ! nomore;
                 {nomore, State} ->
                     New = G(State),
-                    New ! {req, ReqPid},
                     ReqPid ! {forward, New};
                 {more, State} ->
                     self() ! {req, ReqPid},
@@ -105,6 +106,10 @@ bind(Stream, G) ->
                 {forward, New} ->
                     self() ! {req, ReqPid},
                     bind(New, G);
+                {forward, New, State} ->
+                    self() ! {req, ReqPid},
+                    Bind = spawn(fun() -> bind(New, G) end),
+                    mplus(G(State), Bind);
                 delay ->
                     self() ! {req, ReqPid},
                     bind(Stream, G)
@@ -119,8 +124,6 @@ delay(G) ->
                 {req, ReqPid} -> ReqPid ! delay;
                 endofreq -> exit("endofreq")
             end,
-            %todo: makes take4 work but not take5...
-            %timer:sleep(100),
             receive
                 % RPid needs a separate name otherwise compiler complains?
                 {req, RPid} -> RPid ! {forward, G(State)};
@@ -147,6 +150,7 @@ take_all(S) ->
         {nomore, State} -> [State];
         {more, State} -> [State|take_all(S)];
         {forward, Stream} -> take_all(Stream);
+        {forward, Stream, State} -> [State|take_all(Stream)];
         delay -> take_all(S)
     end.
 
@@ -157,6 +161,7 @@ take(N, S) when N > 0 ->
         {nomore, State} -> [State];
         {more, State} -> M=N-1, [State|take(M, S)];
         {forward, Stream} -> take(N, Stream);
+        {forward, Stream, State} -> M=N-1, [State|take(M, Stream)];
         delay -> take(N, S)
     end;
 take(0, S) -> S ! endofreq, [].
@@ -179,19 +184,9 @@ sixes(X)  -> disj(equalo(X, 6), delay(fun(State) -> apply(sixes(X), [State]) end
 sevens(X) -> disj(equalo(X, 7), delay(fun(State) -> apply(sevens(X),[State]) end)).
 
 main(_) ->
-    %Out = run(9, [?fresh(X, [disj_plus([fives(X), sixes(X), sevens(X)])])]),
-    %Out = run(9, [?fresh(X, [fives(X)])]),
-    Out = run(4, [?fresh(X, [disj(fives(X), sixes(X))])]),
-    %Out = run(4, [call_fresh(fun(X) -> disj(fives(X), sixes(X)) end)]),
-    %Out = run(4, [?fresh(X, [disj(fives(X), disj(sixes(X), sevens(X)))])]),
-    %Out = run([delay(equalo(3, 3))]),
-    %Out = run([call_fresh(fun(X) -> disj(delay(equalo(X, 3)), equalo(X, 4)) end)]),
-    %Out = mK_reify(take_all(call_empty_state(call_fresh(fun(X) -> equalo(X, 3) end)))),
-    %Out = mK_reify(take_all(call_empty_state(call_fresh(fun(X) -> disj(equalo(X, 5), equalo(X, 6)) end)))),
-    %Out = mK_reify(take(1, call_empty_state(call_fresh(fun(X) -> disj(equalo(X, 5), equalo(X, 6)) end)))),
-    %Out = mK_reify(take_all(call_empty_state(call_fresh(fun(X) -> call_fresh(fun(Y) -> conj(equalo(X, 5), equalo(Y, 6)) end) end)))),
+    Out = run(9, [?fresh(X, [disj_plus([fives(X), sixes(X), sevens(X)])])]),
     io:format("~w\n", [Out]).
 
 start() ->
-    Out = mK_reify(take_all(call_empty_state(call_fresh(fun(X) -> equalo(X, 3) end)))),
+    Out = run(9, [?fresh(X, [disj_plus([fives(X), sixes(X), sevens(X)])])]),
     io:format("~w\n", [Out]).
