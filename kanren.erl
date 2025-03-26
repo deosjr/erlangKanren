@@ -1,6 +1,7 @@
 -module(kanren).
 -export([start/0]).
 
+%% todo: use Record?
 var(C) -> {var, C}.
 
 empty_state() -> {#{}, 0}.
@@ -41,9 +42,8 @@ walk(U, _) -> U.
 
 call_fresh(F) ->
     fun({Sub,VC}) ->
-        VC1 = VC + 1,
         G = F(var(VC)),
-        G({Sub,VC1})
+        G({Sub,VC+1})
     end.
 
 disj(G1, G2) -> fun(State) -> mplus(G1(State), G2(State)) end.
@@ -89,7 +89,7 @@ take_all(S) ->
 take(N, S) when N > 0 ->
     case pull(S) of
         [] -> [];
-        [H|T] -> M = N-1, [H|take(M, T)]
+        [H|T] -> [H|take(N-1, T)]
     end;
 take(0, _) -> [].
 

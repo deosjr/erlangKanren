@@ -1,5 +1,6 @@
 -module(actors).
--export([start/0]).
+-include("macros.erl").
+-export([start/0, call_fresh/1, run/1, run/2, equalo/2, disj/2, disj_plus/1, conj/2, conj_plus/1, delay/1]).
 
 var(C) -> {var, C}.
 
@@ -55,9 +56,8 @@ walk(U, _) -> U.
 
 call_fresh(F) ->
     fun({Sub,VC}) ->
-        VC1 = VC + 1,
         G = F(var(VC)),
-        G({Sub,VC1})
+        G({Sub,VC+1})
     end.
 
 disj(G1, G2) -> fun(State) -> spawn(fun() -> mplus(G1(State), G2(State)) end) end.
@@ -138,11 +138,6 @@ disj_plus([G|T]) -> disj(G, disj_plus(T)).
 conj_plus([G]) -> G;
 conj_plus([G|T]) -> conj(G, conj_plus(T)).
 
--define(fresh(Goals), conj_plus(Goals)).
--define(fresh(X, Goals), call_fresh(fun(X) -> conj_plus(Goals) end)).
--define(fresh(X,Y, Goals), call_fresh(fun(X) -> call_fresh(fun(Y) -> conj_plus(Goals) end) end)).
-%% etc..
-
 take_all(S) ->
     S ! {req, self()},
     receive
@@ -159,9 +154,9 @@ take(N, S) when N > 0 ->
     receive
         nomore -> [];
         {nomore, State} -> [State];
-        {more, State} -> M=N-1, [State|take(M, S)];
+        {more, State} -> [State|take(N-1, S)];
         {forward, Stream} -> take(N, Stream);
-        {forward, Stream, State} -> M=N-1, [State|take(M, Stream)];
+        {forward, Stream, State} -> [State|take(N-1, Stream)];
         delay -> take(N, S)
     end;
 take(0, S) -> S ! endofreq, [].
@@ -179,9 +174,9 @@ mK_reify(States) -> lists:map(fun({Sub,_}) -> walk_star(var(0), Sub) end, States
 run(N, Goals) -> mK_reify(take(N, call_empty_state(conj_plus(Goals)))).
 run(Goals)   -> mK_reify(take_all(call_empty_state(conj_plus(Goals)))).
 
-fives(X)  -> disj(equalo(X, 5), delay(fun(State) -> apply(fives(X), [State]) end)).
-sixes(X)  -> disj(equalo(X, 6), delay(fun(State) -> apply(sixes(X), [State]) end)).
-sevens(X) -> disj(equalo(X, 7), delay(fun(State) -> apply(sevens(X),[State]) end)).
+fives(X)  -> disj(equalo(X, 5), ?delay(fives(X))).
+sixes(X)  -> disj(equalo(X, 6), ?delay(sixes(X))).
+sevens(X) -> disj(equalo(X, 7), ?delay(sevens(X))).
 
 main(_) ->
     Out = run(9, [?fresh(X, [disj_plus([fives(X), sixes(X), sevens(X)])])]),
