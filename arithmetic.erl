@@ -52,4 +52,4 @@ minusO(N, M, K) -> plusO(M, K, N).
 
 main(_) ->
     Out = run([?fresh(Q,X,Y, [equalo(Q, [X,Y]), plusO(X, Y, build_num(1000))])]),
-    io:format("~w\n", [length(Out)]).   % currently takes ~3.5sec
+    io:format("~w\n", [length(Out)]).   % currently takes ~2.2sec

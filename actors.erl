@@ -2,9 +2,10 @@
 -include("macros.erl").
 -export([start/0, call_fresh/1, run/1, run/2, equalo/2, disj/2, disj_plus/1, conj/2, conj_plus/1, delay/1]).
 
-var(C) -> {var, C}.
+-record(var, {counter}).
 
-empty_state() -> {#{}, 0}.
+% using a functional extendible array is probably better than a HAMT
+empty_state() -> {array:new(), 0}.
 call_empty_state(G) -> G(empty_state()).
 
 %% stream = actor
@@ -12,19 +13,18 @@ call_empty_state(G) -> G(empty_state()).
 %% receive answers as {more, {Sub,VC}}, {nomore, {Sub,VC}} or nomore
 %% {forward, New} indicates stream is replaced by New stream
 %% {forward, New, {Sub,VC}} combines answer and forward in one msg
-%% NOTE: currently work only starts upon request
 %% TODO: main should spawn a process that takes queries
 %% and returns answers using take or take_all
 
 equalo(U, V) ->
     fun({Sub,VC}) ->
         spawn(fun() ->
-            receive
-                {req, ReqPid} ->
-                    case unify(U, V, Sub) of
-                        false -> ReqPid ! nomore;
-                        S -> ReqPid ! {nomore, {S,VC}}
-                    end
+            S = unify(U, V, Sub),
+            receive {req, ReqPid} ->
+                case S of
+                    false -> ReqPid ! nomore;
+                    _ -> ReqPid ! {nomore, {S,VC}}
+                end
             end
         end)
     end.
@@ -36,8 +36,8 @@ unify(U, V, Sub) ->
 
 %% todo: occurs check
 unify_({var, C}, {var, C}, Sub) -> Sub;
-unify_(U={var, _}, V, Sub) -> Sub#{U=>V};
-unify_(U, V={var, _}, Sub) -> Sub#{V=>U};
+unify_({var, C}, V, Sub) -> array:set(C, V, Sub);
+unify_(U, {var, C}, Sub) -> array:set(C, U, Sub);
 unify_([UH|UT], [VH|VT], Sub) ->
     case unify(UH, VH, Sub) of
         false -> false;
@@ -47,16 +47,16 @@ unify_(X, X, Sub) -> Sub;
 unify_(_, _, _) -> false.
 
     
-walk(U={var,_}, Sub) ->
-    case maps:find(U, Sub) of
-        {ok,V} -> walk(V, Sub);
-        _ -> U
+walk(U={var,C}, Sub) ->
+    case array:get(C, Sub) of
+        undefined -> U;
+        V -> walk(V, Sub)
     end;
 walk(U, _) -> U.
 
 call_fresh(F) ->
     fun({Sub,VC}) ->
-        G = F(var(VC)),
+        G = F(#var{counter=VC}),
         G({Sub,VC+1})
     end.
 
@@ -169,7 +169,7 @@ walk_star(V, Sub) ->
         X -> X
     end.
 
-mK_reify(States) -> lists:map(fun({Sub,_}) -> walk_star(var(0), Sub) end, States).
+mK_reify(States) -> lists:map(fun({Sub,_}) -> walk_star(#var{counter=0}, Sub) end, States).
 
 run(N, Goals) -> mK_reify(take(N, call_empty_state(conj_plus(Goals)))).
 run(Goals)   -> mK_reify(take_all(call_empty_state(conj_plus(Goals)))).
