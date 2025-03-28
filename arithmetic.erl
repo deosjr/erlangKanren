@@ -51,5 +51,6 @@ plusO(N, M, K) -> adderO(0, N, M, K).
 minusO(N, M, K) -> plusO(M, K, N).
 
 main(_) ->
+    avl:init(),
     Out = run([?fresh(Q,X,Y, [equalo(Q, [X,Y]), plusO(X, Y, build_num(1000))])]),
     io:format("~w\n", [length(Out)]).   % currently takes ~2.2sec

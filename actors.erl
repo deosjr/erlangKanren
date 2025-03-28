@@ -4,8 +4,7 @@
 
 -record(var, {counter}).
 
-% using a functional extendible array is probably better than a HAMT
-empty_state() -> {array:new(), 0}.
+empty_state() -> {avl:new(), 0}.
 call_empty_state(G) -> G(empty_state()).
 
 %% stream = actor
@@ -36,8 +35,8 @@ unify(U, V, Sub) ->
 
 %% todo: occurs check
 unify_({var, C}, {var, C}, Sub) -> Sub;
-unify_({var, C}, V, Sub) -> array:set(C, V, Sub);
-unify_(U, {var, C}, Sub) -> array:set(C, U, Sub);
+unify_({var, C}, V, Sub) -> avl:insert(Sub, C, V);
+unify_(U, {var, C}, Sub) -> avl:insert(Sub, C, U);
 unify_([UH|UT], [VH|VT], Sub) ->
     case unify(UH, VH, Sub) of
         false -> false;
@@ -48,9 +47,9 @@ unify_(_, _, _) -> false.
 
     
 walk(U={var,C}, Sub) ->
-    case array:get(C, Sub) of
+    case avl:lookup(Sub, C) of
         undefined -> U;
-        V -> walk(V, Sub)
+        {ok,V} -> walk(V, Sub)
     end;
 walk(U, _) -> U.
 
@@ -179,6 +178,7 @@ sixes(X)  -> disj(equalo(X, 6), ?delay(sixes(X))).
 sevens(X) -> disj(equalo(X, 7), ?delay(sevens(X))).
 
 main(_) ->
+    avl:init(),
     Out = run(9, [?fresh(X, [disj_plus([fives(X), sixes(X), sevens(X)])])]),
     io:format("~w\n", [Out]).
 
