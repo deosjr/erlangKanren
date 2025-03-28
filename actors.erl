@@ -67,53 +67,59 @@ mplus(Str1, Str2) ->
     receive
         {req, ReqPid} ->
             Str1 ! {req, self()},
-            receive
-                nomore ->
-                    ReqPid ! {forward, Str2};
-                {nomore, State} ->
-                    ReqPid ! {forward, Str2, State};
-                {more, State} ->
-                    ReqPid ! {more, State},
-                    mplus(Str2, Str1);
-                {forward, New} ->
-                    self() ! {req, ReqPid},
-                    mplus(New, Str2);
-                {forward, New, State} ->
-                    ReqPid ! {more, State},
-                    mplus(Str2, New);
-                delay ->
-                    self() ! {req, ReqPid},
-                    mplus(Str2, Str1)
-            end;
+            mplus_(ReqPid, Str1, Str2);
         endofreq -> exit("endofreq") % todo either spawn_link still or propagate endofreq to children
+    end.
+
+mplus_(ReqPid, Str1, Str2) ->
+    receive
+        nomore ->
+            ReqPid ! {forward, Str2};
+        {nomore, State} ->
+            ReqPid ! {forward, Str2, State};
+        {more, State} ->
+            ReqPid ! {more, State},
+            mplus(Str2, Str1);
+        {forward, New} ->
+            New ! {req, self()},
+            mplus_(ReqPid, New, Str2);
+        {forward, New, State} ->
+            ReqPid ! {more, State},
+            mplus(Str2, New);
+        delay ->
+            Str2 ! {req, self()},
+            mplus_(ReqPid, Str2, Str1)
     end.
 
 bind(Stream, G) ->
     receive
         {req, ReqPid} ->
             Stream ! {req, self()},
-            receive
-                nomore ->
-                    ReqPid ! nomore;
-                {nomore, State} ->
-                    New = G(State),
-                    ReqPid ! {forward, New};
-                {more, State} ->
-                    self() ! {req, ReqPid},
-                    Bind = spawn(fun() -> bind(Stream, G) end),
-                    mplus(G(State), Bind);
-                {forward, New} ->
-                    self() ! {req, ReqPid},
-                    bind(New, G);
-                {forward, New, State} ->
-                    self() ! {req, ReqPid},
-                    Bind = spawn(fun() -> bind(New, G) end),
-                    mplus(G(State), Bind);
-                delay ->
-                    self() ! {req, ReqPid},
-                    bind(Stream, G)
-            end;
+            bind_(ReqPid, Stream, G);
         endofreq -> exit("endofreq")
+    end.
+
+bind_(ReqPid, Stream, G) ->
+    receive
+        nomore ->
+            ReqPid ! nomore;
+        {nomore, State} ->
+            ReqPid ! {forward, G(State)};
+        {more, State} ->
+            S = G(State),
+            S ! {req, self()},
+            Bind = spawn(fun() -> bind(Stream, G) end),
+            mplus_(ReqPid, S, Bind);
+        {forward, New} ->
+            New ! {req, self()},
+            bind_(ReqPid, New, G);
+        {forward, New, State} ->
+            S = G(State),
+            S ! {req, self()},
+            Bind = spawn(fun() -> bind(New, G) end),
+            mplus_(ReqPid, S, Bind);
+        delay ->
+            bind_(ReqPid, Stream, G)
     end.
 
 delay(G) ->
@@ -123,9 +129,10 @@ delay(G) ->
                 {req, ReqPid} -> ReqPid ! delay;
                 endofreq -> exit("endofreq")
             end,
+            S = G(State),
             receive
                 % RPid needs a separate name otherwise compiler complains?
-                {req, RPid} -> RPid ! {forward, G(State)};
+                {req, RPid} -> RPid ! {forward, S};
                 endofreq -> exit("endofreq")
             end
         end)
