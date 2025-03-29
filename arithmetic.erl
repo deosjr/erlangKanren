@@ -1,6 +1,6 @@
 -module(arithmetic).
 -include("macros.erl").
--import(actors, [run/1, run/2, disj/2, disj_plus/1, equalo/2, call_fresh/1, conj_plus/1, delay/1]).
+-import(actors, [run/1, run/2, disj/2, disj_plus/1, equalo/2, call_fresh/1, conj_plus/1, delay/1, disj_conc/1]).
 
 build_num(0) -> [];
 build_num(N) when N rem 2 == 0 ->

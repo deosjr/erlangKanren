@@ -1,6 +1,6 @@
 -module(actors).
 -include("macros.erl").
--export([start/0, call_fresh/1, run/1, run/2, equalo/2, disj/2, disj_plus/1, conj/2, conj_plus/1, delay/1]).
+-export([start/0, call_fresh/1, run/1, run/2, equalo/2, disj/2, disj_plus/1, conj/2, conj_plus/1, delay/1, disj_conc/1]).
 
 -record(var, {counter}).
 
@@ -180,13 +180,58 @@ mK_reify(States) -> lists:map(fun({Sub,_}) -> walk_star(#var{counter=0}, Sub) en
 run(N, Goals) -> mK_reify(take(N, call_empty_state(conj_plus(Goals)))).
 run(Goals)   -> mK_reify(take_all(call_empty_state(conj_plus(Goals)))).
 
+disj_conc(Goals) -> 
+    fun(State) ->
+        spawn(fun() ->
+            Pids = lists:map(fun(G) -> G(State) end, Goals),
+            mplusplus(Pids, [])
+        end)
+    end.
+
+mplusplus(Pids=[_|_], []) ->
+    {NewPids, Buffer} = buffer(Pids),
+    mplusplus(NewPids, Buffer);
+mplusplus(Pids, Buffer) ->
+    receive {req, ReqPid} -> mplusplus_(ReqPid, Pids, Buffer) end.
+
+mplusplus_(ReqPid, [], []) -> ReqPid ! nomore;
+mplusplus_(ReqPid, [], [State]) -> ReqPid ! {nomore, State};
+mplusplus_(ReqPid, [Pid], [State]) -> ReqPid ! {forward, Pid, State};
+mplusplus_(ReqPid, Pids, [State|Buffer]) ->
+    ReqPid ! {more, State},
+    mplusplus(Pids, Buffer).
+
+buffer(Pids) ->
+    %% This doesn't work?! Gets into deadlock somehow
+    %lists:map(fun(P) -> P ! {req, self()} end, Pids),
+    buffer_(Pids, [], []).
+
+buffer_([], PidAcc, StAcc) -> {lists:reverse(PidAcc), lists:reverse(StAcc)};
+buffer_([P|Pids], PidAcc, StAcc) ->
+    %% whilst this does work, but I'd expect to be just slower..
+    P ! {req, self()},
+    receive
+        nomore -> 
+            buffer_(Pids, PidAcc, StAcc);
+        {nomore, St} ->
+            buffer_(Pids, PidAcc, [St|StAcc]);
+        {more, St} ->
+            buffer_(Pids, [P|PidAcc], [St|StAcc]);
+        {forward, New} ->
+            buffer_(Pids, [New|PidAcc], StAcc);
+        {forward, New, St} ->
+            buffer_(Pids, [New|PidAcc], [St|StAcc]);
+        delay ->
+            buffer_(Pids, [P|PidAcc], StAcc)
+    end.
+
 fives(X)  -> disj(equalo(X, 5), ?delay(fives(X))).
 sixes(X)  -> disj(equalo(X, 6), ?delay(sixes(X))).
 sevens(X) -> disj(equalo(X, 7), ?delay(sevens(X))).
 
 main(_) ->
     avl:init(),
-    Out = run(9, [?fresh(X, [disj_plus([fives(X), sixes(X), sevens(X)])])]),
+    Out = run(9, [?fresh(X, [disj_conc([fives(X), sixes(X), sevens(X)])])]),
     io:format("~w\n", [Out]).
 
 start() ->
